@@ -1,0 +1,4 @@
+# Configuration file for openwrt-mcp-server
+
+mqtt_broker = "localhost"
+http_port = 8080
