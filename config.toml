@@ -1,4 +1,14 @@
 # Configuration file for openwrt-mcp-server
 
-mqtt_broker = "localhost"
-http_port = 8080
+[mqtt]
+broker = "mqtt://localhost:1883"
+client_id = "openwrt-mcp-server"
+username = ""
+password = ""
+topic_prefix = "mcp/device/openwrt-mcp-server"
+
+[http]
+enable = true
+listen_addr = "0.0.0.0"
+port = 8080
+token = "change-me"

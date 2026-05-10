@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:openwrt-mcp-server:schema:command:1.0.0",
+  "title": "OpenWrt MCP Command Request",
+  "type": "object",
+  "required": ["jsonrpc", "method", "params", "id"],
+  "additionalProperties": false,
+  "properties": {
+    "jsonrpc": {
+      "const": "2.0"
+    },
+    "method": {
+      "const": "device.executeCommand"
+    },
+    "params": {
+      "type": "object",
+      "required": ["command"],
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "type": "string",
+          "minLength": 1
+        },
+        "args": {
+          "type": "object",
+          "default": {}
+        },
+        "schema_version": {
+          "type": "string",
+          "default": "1.0.0"
+        }
+      }
+    },
+    "id": {
+      "oneOf": [
+        { "type": "string" },
+        { "type": "integer" },
+        { "type": "null" }
+      ]
+    }
+  }
+}

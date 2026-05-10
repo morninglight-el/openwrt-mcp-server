@@ -1,60 +1,57 @@
 # openwrt-mcp-server
 
-`openwrt-mcp-server` is a lightweight and extensible MCP (Model Context Protocol) server designed to run on OpenWrt-based embedded routers and devices. It enables two-way communication between the device and external AI systems using MQTT and HTTP, with JSON-RPC 2.0 as the message format.
+`openwrt-mcp-server` is a Rust-based MCP-style bridge for OpenWrt and Linux edge devices. Today it exposes a single-device JSON-RPC control surface over HTTP and MQTT. The long-term direction is to let the Rust server also run outside OpenWrt as a standalone fleet MCP service that can manage many OpenWrt devices through EdgePulse and other device adapters.
 
-This server is intended to provide a secure and structured interface for AI agents to:
+Current deployment modes:
 
-- Query live device context (network, Wi-Fi, system metrics)
-- Execute system-level commands remotely
-- Support real-time command-response and context streaming
+- Local OpenWrt or Linux companion process for one device.
+- Remote bridge endpoint for AI agents and orchestration systems.
+- Future standalone fleet server with device registry, rule-based access control, and multi-tenant isolation.
 
-## ✨ Features
+## Current Capabilities
 
-- Built in Rust for performance and safety
-- Supports MQTT (via `rumqttc`) and HTTP (via `warp`)
-- Compatible with JSON-RPC 2.0 for AI model integration
-- Modular architecture for future extensibility
-- Full TOML configuration with all fields actually used in code (see below)
-- Secure HTTP API with token-based authentication (via `x-api-token` header)
-- All code comments and documentation are in English for international collaboration
-- Compiles cleanly with no warnings (all config fields are used)
-- Low memory footprint, suitable for embedded OpenWrt targets
+- HTTP API using `warp`.
+- MQTT transport using `rumqttc`.
+- JSON-RPC 2.0 request and response envelopes.
+- Token-protected HTTP endpoints via the `x-api-token` header.
+- TOML configuration with startup validation.
+- Real context collection from OpenWrt `ubus`, with Linux fallback data from `/proc`, `/sys`, and `ip -j`.
+- Allowlisted command execution for supported device actions.
+- `device.describe` capability introspection for transports, commands, command risk metadata, and context collectors.
+- Lightweight command and context registries as extension points for future modules.
+- Structured JSON logs for service, config, HTTP, and MQTT events.
+- JSON Schema documentation for command and context payloads under `schema/`.
 
-## 🌎 Use Cases
+## Project Layout
 
-- AI-powered home gateway monitoring and orchestration
-- Edge-managed device fleet context reporting
-- Auto-recovery and self-healing network policies via AI
-- Integration with LLMs and orchestration pipelines (e.g., n8n, LangChain)
+- `src/context/collector.rs`: Collects device context.
+- `src/context/registry.rs`: Declares built-in context collectors and extension metadata.
+- `src/executor/command.rs`: Dispatches allowlisted commands.
+- `src/executor/registry.rs`: Declares command names, required args, and risk levels.
+- `src/http/routes.rs`: Exposes authenticated HTTP JSON-RPC endpoints.
+- `src/mqtt/handler.rs`: Handles MQTT subscription, dispatch, and response publishing.
+- `src/config/mod.rs`: Loads and validates `config.toml`.
+- `src/logging.rs`: Emits compact JSON log records.
+- `src/model/types.rs`: Defines shared request/result/context types.
+- `schema/`: Contains JSON Schema files for documented payload shapes.
+- `docs/edgepulse-integration-roadmap.md`: Describes EdgePulse, fleet, RBAC, and multi-tenant plans.
 
-## 🛠️ Components
+## Build and Test
 
-- `context/collector.rs`: Gathers runtime status from OpenWrt (ubus, uci, ifstatus)
-- `mqtt/handler.rs`: Handles MQTT connection, authentication, topic subscription (using all config fields), and JSON-RPC command dispatch/response
-- `http/routes.rs`: RESTful API for status and command entry, with token authentication required for all endpoints
-- `executor/command.rs`: Executes validated system-level instructions
-- `config/mod.rs`: Loads and validates full `.toml` configuration, including all MQTT/HTTP fields
-- All modules are documented in English
-
-## 🛡️ Protocol
-
-Follows JSON-RPC 2.0. See REQUIREMENTS.md for full message schemas.
-
-## 🔧 Building
-
-```bash
+```sh
 cargo build --release
+cargo test
 ```
 
-Cross-compilation for OpenWrt (musl) recommended for deployment.
+For OpenWrt deployment, cross-compile with the OpenWrt SDK or a musl target appropriate for the device.
 
-## 🌐 Configuration
+## Configuration
 
-Example `config.toml` (all fields are required and used):
+Example `config.toml`:
 
 ```toml
 [mqtt]
-broker = "mqtts://iot.example.com:8883"
+broker = "mqtt://localhost:1883"
 client_id = "openwrt-one"
 username = "mcp-user"
 password = "mcp-pass"
@@ -67,38 +64,136 @@ port = 8080
 token = "your-api-token"
 ```
 
-- All configuration fields are loaded and used in the codebase.
-- MQTT uses client_id, username, password, and topic_prefix for connection and topic management.
-- HTTP server uses enable, listen_addr, port, and token for secure API access.
+Validation currently rejects:
 
-## 🚀 Roadmap
+- Empty `mqtt.broker`, `mqtt.client_id`, or `mqtt.topic_prefix`.
+- MQTT topic prefixes containing `+` or `#`.
+- Invalid `http.listen_addr`.
+- `http.port = 0`.
+- Empty `http.token` when HTTP is enabled.
 
-- [x] Initial MQTT + HTTP dual-protocol support
-- [x] Full TOML configuration with all fields used in code
-- [x] JSON-RPC 2.0 command and context schema (dispatch and response logic in MQTT/HTTP)
-- [x] Secure HTTP API with token-based authentication
-- [x] All code comments and documentation in English
-- [x] Compiles cleanly with no warnings
-- [ ] Context collector with UCI/UBUS/ifstatus integration
-- [ ] Device capability introspection (`device.describe`)
-- [ ] WebSocket transport layer for real-time control
-- [ ] Command allowlisting and sandboxing
-- [ ] Plugin-style extensibility for new command modules
-- [ ] Streaming telemetry metrics channel (e.g., `/metrics`)
-- [ ] CLI interface for testing/debugging commands
-- [ ] Optional gRPC support for external orchestrators
-- [ ] JSON Schema-based validation for input/output
-- [ ] OTA update interface (optional integration)
-- [ ] Context delta compression for low-bandwidth MQTT
-- [ ] Persistent log and audit tracking via syslog
-- [ ] Secure boot detection and system integrity reporting
-- [ ] Multilingual context formatting for LLM compatibility
-- [ ] Scheduler support for recurring commands
+## HTTP API
 
----
+All HTTP endpoints require:
 
-## 🏆 Implementation Note
+```text
+x-api-token: <configured token>
+```
 
-This project was implemented and refactored by **Cline**, an advanced AI software engineer powered by the OpenAI GPT-4 Turbo model.  
-All code, configuration, and documentation improvements—including full config usage, secure API, and clean compilation—were designed and delivered by Cline (executed by OpenAI GPT-4 Turbo).  
-If you are reading this README, you are witnessing the power and precision of AI-driven software engineering, made possible by the GPT-4 Turbo model.
+Get current context:
+
+```sh
+curl -H 'x-api-token: change-me' \
+  http://127.0.0.1:8080/api/context
+```
+
+Describe server capabilities:
+
+```sh
+curl -H 'x-api-token: change-me' \
+  http://127.0.0.1:8080/api/describe
+```
+
+Execute an allowlisted command:
+
+```sh
+curl -H 'x-api-token: change-me' \
+  -H 'content-type: application/json' \
+  -d '{"jsonrpc":"2.0","method":"device.executeCommand","params":{"command":"get_context"},"id":"cmd-1"}' \
+  http://127.0.0.1:8080/api/cmd
+```
+
+Supported built-in commands are declared in `src/executor/registry.rs`.
+
+## MQTT API
+
+Command topic:
+
+```text
+{topic_prefix}/cmd
+```
+
+Response topic:
+
+```text
+{topic_prefix}/resp
+```
+
+Example capability request:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "device.describe",
+  "params": {},
+  "id": "describe-1"
+}
+```
+
+Example command request:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "device.executeCommand",
+  "params": {
+    "command": "restart_interface",
+    "args": {
+      "interface": "wan"
+    }
+  },
+  "id": "cmd-1"
+}
+```
+
+## Schemas
+
+Schema files document the expected payloads:
+
+- `schema/command.schema.json`
+- `schema/context.schema.json`
+
+Runtime validation is currently implemented through typed parsing, command allowlisting, argument checks, and config validation. Full JSON Schema validation is planned as a future hardening step.
+
+## EdgePulse Integration
+
+`openwrt-mcp-server` is intended to integrate with `../edgepulse` as a remote MCP bridge. EdgePulse should remain the OpenWrt-local authority for telemetry, policy, named actions, audit logs, and AI agent conversation state. This Rust server should translate remote HTTP/MQTT/MCP-facing requests into EdgePulse local APIs where available.
+
+See [docs/edgepulse-integration-roadmap.md](docs/edgepulse-integration-roadmap.md) for the detailed plan.
+
+## Roadmap
+
+Current baseline:
+
+- Single-device HTTP/MQTT JSON-RPC bridge.
+- OpenWrt/Linux context collection.
+- Command and context registries.
+- `device.describe` introspection.
+- Structured JSON logs.
+- Config validation.
+- Schema documentation.
+
+Near-term hardening:
+
+- Runtime JSON Schema validation.
+- Persistent audit log for HTTP/MQTT requests and command results.
+- EdgePulse client adapter for `edgepulse-ctl`, then `ubus` or Unix socket.
+- Replace direct mutation commands with EdgePulse policy-gated named actions where available.
+- Command sandboxing beyond the initial allowlist.
+- CLI utility for testing and debugging requests.
+
+Fleet direction:
+
+- Standalone MCP server mode outside OpenWrt.
+- Device registry and explicit target selection.
+- Rule-based access control for users, service accounts, devices, methods, and permissions.
+- Tenant-aware config, tokens, MQTT routing, context caches, policies, and audit records.
+- Multi-tenant fleet service operation.
+
+Longer-term extensions:
+
+- WebSocket transport for dashboards and live operations.
+- Streaming telemetry metrics endpoint.
+- Context delta compression for low-bandwidth MQTT.
+- Secure boot and system integrity reporting.
+- Scheduler support for recurring commands.
