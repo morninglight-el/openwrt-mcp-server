@@ -9,7 +9,7 @@ use rumqttc::{AsyncClient, MqttOptions, QoS, Transport};
 use tokio::time::Duration;
 
 pub async fn initialize_mqtt(config: &Config) -> AsyncClient {
-    println!("Initializing MQTT...");
+    crate::logging::info("mqtt.initializing", &[]);
 
     let (host, port, tls) = broker_endpoint(&config.mqtt.broker);
 
@@ -28,6 +28,13 @@ pub async fn initialize_mqtt(config: &Config) -> AsyncClient {
         .subscribe(cmd_topic, QoS::AtMostOnce)
         .await
         .expect("Failed to subscribe to command topic");
+    crate::logging::info(
+        "mqtt.subscribed",
+        &[(
+            "topic",
+            serde_json::json!(format!("{}/cmd", &config.mqtt.topic_prefix)),
+        )],
+    );
 
     // Spawn a task to handle the MQTT event loop and process incoming messages
     let response_client = client.clone();
@@ -40,12 +47,17 @@ pub async fn initialize_mqtt(config: &Config) -> AsyncClient {
             if let Incoming(Publish(publish)) = event {
                 let payload = &publish.payload;
                 if let Ok(text) = std::str::from_utf8(payload) {
-                    println!("Received MQTT message: {}", text);
                     if let Ok(json) = serde_json::from_str::<serde_json::Value>(text) {
                         if let Some(method) = json.get("method").and_then(|m| m.as_str()) {
+                            crate::logging::info(
+                                "mqtt.message.received",
+                                &[
+                                    ("method", serde_json::json!(method)),
+                                    ("topic", serde_json::json!(publish.topic.clone())),
+                                ],
+                            );
                             match method {
                                 "device.executeCommand" => {
-                                    println!("Received executeCommand: {:?}", json);
                                     let response = execute_command_response(&json).await;
                                     publish_response(&response_client, &response_topic, response)
                                         .await;
@@ -56,6 +68,15 @@ pub async fn initialize_mqtt(config: &Config) -> AsyncClient {
                                     let response = serde_json::json!({
                                         "jsonrpc": "2.0",
                                         "result": context,
+                                        "id": json.get("id").cloned().unwrap_or(serde_json::Value::Null),
+                                    });
+                                    publish_response(&response_client, &response_topic, response)
+                                        .await;
+                                }
+                                "device.describe" => {
+                                    let response = serde_json::json!({
+                                        "jsonrpc": "2.0",
+                                        "result": crate::executor::command::device_describe(),
                                         "id": json.get("id").cloned().unwrap_or(serde_json::Value::Null),
                                     });
                                     publish_response(&response_client, &response_topic, response)
@@ -76,18 +97,27 @@ pub async fn initialize_mqtt(config: &Config) -> AsyncClient {
                             }
                         }
                     } else {
-                        println!("Failed to parse JSON-RPC payload");
+                        crate::logging::warn(
+                            "mqtt.message.invalid_json",
+                            &[("topic", serde_json::json!(publish.topic))],
+                        );
                     }
                 } else {
-                    println!("Failed to decode MQTT payload as UTF-8");
+                    crate::logging::warn(
+                        "mqtt.message.invalid_utf8",
+                        &[("topic", serde_json::json!(publish.topic))],
+                    );
                 }
             } else {
-                println!("MQTT Event: {:?}", event);
+                crate::logging::info(
+                    "mqtt.event",
+                    &[("event", serde_json::json!(format!("{event:?}")))],
+                );
             }
         }
     });
 
-    println!("MQTT client initialized and subscribed to command topic.");
+    crate::logging::info("mqtt.initialized", &[]);
 
     client
 }
@@ -118,7 +148,13 @@ async fn execute_command_response(json: &serde_json::Value) -> serde_json::Value
 async fn publish_response(client: &AsyncClient, topic: &str, response: serde_json::Value) {
     let payload = response.to_string();
     if let Err(error) = client.publish(topic, QoS::AtMostOnce, false, payload).await {
-        println!("Failed to publish MQTT response to {topic}: {error}");
+        crate::logging::error(
+            "mqtt.response.publish_failed",
+            &[
+                ("topic", serde_json::json!(topic)),
+                ("error", serde_json::json!(error.to_string())),
+            ],
+        );
     }
 }
 

@@ -4,3 +4,4 @@
  */
 
 pub mod command;
+pub mod registry;

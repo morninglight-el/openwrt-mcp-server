@@ -10,7 +10,7 @@ use warp::Filter;
 pub fn routes(
     token: &'static str,
 ) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
-    println!("Initializing HTTP routes...");
+    crate::logging::info("http.routes.initializing", &[]);
 
     // Filter to check the x-api-token header
     let token_filter = warp::header::exact("x-api-token", token);
@@ -27,15 +27,32 @@ pub fn routes(
             })))
         });
 
+    let describe_route = warp::path!("api" / "describe")
+        .and(warp::get())
+        .and(token_filter.clone())
+        .map(|| {
+            warp::reply::json(&serde_json::json!({
+                "jsonrpc": "2.0",
+                "result": crate::executor::command::device_describe(),
+                "id": "describe-001"
+            }))
+        });
+
     let command_route = warp::path!("api" / "cmd")
         .and(warp::post())
         .and(token_filter.clone())
         .and(warp::body::json())
         .and_then(|cmd: serde_json::Value| async move {
-            println!("Received command: {:?}", cmd);
             let id = cmd.get("id").cloned().unwrap_or(serde_json::Value::Null);
             let response = match parse_command_params(&cmd) {
                 Ok((command, args)) => {
+                    crate::logging::info(
+                        "http.command.received",
+                        &[
+                            ("command", serde_json::json!(command)),
+                            ("id", serde_json::json!(id.clone())),
+                        ],
+                    );
                     let result = crate::executor::command::execute_command(&command, args).await;
                     serde_json::json!({
                         "jsonrpc": "2.0",
@@ -43,20 +60,29 @@ pub fn routes(
                         "id": id,
                     })
                 }
-                Err(message) => serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "error": {
-                        "code": -32602,
-                        "message": message,
-                    },
-                    "id": id,
-                }),
+                Err(message) => {
+                    crate::logging::warn(
+                        "http.command.rejected",
+                        &[
+                            ("reason", serde_json::json!(message)),
+                            ("id", serde_json::json!(id.clone())),
+                        ],
+                    );
+                    serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "error": {
+                            "code": -32602,
+                            "message": message,
+                        },
+                        "id": id,
+                    })
+                }
             };
 
             Ok::<_, warp::Rejection>(warp::reply::json(&response))
         });
 
-    context_route.or(command_route)
+    context_route.or(describe_route).or(command_route)
 }
 
 fn parse_command_params(

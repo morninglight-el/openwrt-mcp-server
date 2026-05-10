@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:openwrt-mcp-server:schema:context:1.0.0",
+  "title": "OpenWrt MCP Context Report",
+  "type": "object",
+  "required": [
+    "device_id",
+    "uptime",
+    "cpu_load",
+    "interfaces",
+    "wifi_clients",
+    "schema_version"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "device_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "uptime": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "cpu_load": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 3,
+      "items": {
+        "type": "number",
+        "minimum": 0
+      }
+    },
+    "interfaces": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object"
+      }
+    },
+    "wifi_clients": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "schema_version": {
+      "type": "string",
+      "const": "1.0.0"
+    }
+  }
+}

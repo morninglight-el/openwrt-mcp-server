@@ -2,10 +2,19 @@
 // This module is responsible for executing commands received via MQTT or HTTP.
 
 use crate::context::collector;
+use crate::context::registry::builtin_collectors;
+use crate::executor::registry::{builtin_commands, find_command};
 use serde_json::{json, Value};
 use tokio::process::Command;
 
 pub async fn execute_command(command: &str, args: Value) -> Value {
+    if find_command(command).is_none() {
+        return json!({
+            "status": "error",
+            "output": format!("Unsupported command: {command}"),
+        });
+    }
+
     match command {
         "get_context" | "report_context" => {
             let context = collector::collect_context().await;
@@ -14,6 +23,7 @@ pub async fn execute_command(command: &str, args: Value) -> Value {
                 "output": context,
             })
         }
+        "device_describe" => device_describe(),
         "restart_interface" => restart_interface(args).await,
         "reload_network" => {
             run_allowlisted_command(
@@ -23,11 +33,25 @@ pub async fn execute_command(command: &str, args: Value) -> Value {
             )
             .await
         }
-        _ => json!({
-            "status": "error",
-            "output": format!("Unsupported command: {command}"),
-        }),
+        _ => unreachable!("command registry and dispatcher are out of sync"),
     }
+}
+
+pub fn device_describe() -> Value {
+    json!({
+        "status": "ok",
+        "output": {
+            "server": "openwrt-mcp-server",
+            "schema_version": "1.0.0",
+            "transports": ["http", "mqtt"],
+            "commands": builtin_commands(),
+            "context_collectors": builtin_collectors(),
+            "extension_points": {
+                "commands": "Add command definitions in executor::registry and dispatch handlers in executor::command.",
+                "context": "Add collector definitions in context::registry and merge outputs in context::collector."
+            }
+        }
+    })
 }
 
 async fn restart_interface(args: Value) -> Value {
@@ -125,7 +149,7 @@ struct ProgramResult {
 
 #[cfg(test)]
 mod tests {
-    use super::{command_output, execute_command, is_safe_interface_name};
+    use super::{command_output, device_describe, execute_command, is_safe_interface_name};
     use serde_json::json;
 
     #[test]
@@ -149,5 +173,13 @@ mod tests {
         let result = execute_command("format_flash", json!({})).await;
 
         assert_eq!(result["status"], "error");
+    }
+
+    #[test]
+    fn describes_builtin_capabilities() {
+        let result = device_describe();
+
+        assert_eq!(result["status"], "ok");
+        assert!(result["output"]["commands"].as_array().unwrap().len() >= 3);
     }
 }
