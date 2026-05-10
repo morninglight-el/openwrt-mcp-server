@@ -16,6 +16,8 @@ This server is intended to provide a secure and structured interface for AI agen
 - Modular architecture for future extensibility
 - Full TOML configuration with all fields actually used in code (see below)
 - Secure HTTP API with token-based authentication (via `x-api-token` header)
+- Real context collection from OpenWrt `ubus` with Linux fallback data from `/proc`, `/sys`, and `ip -j`
+- JSON-RPC command execution with a conservative allowlist for supported device actions
 - All code comments and documentation are in English for international collaboration
 - Compiles cleanly with no warnings (all config fields are used)
 - Low memory footprint, suitable for embedded OpenWrt targets
@@ -32,7 +34,7 @@ This server is intended to provide a secure and structured interface for AI agen
 - `context/collector.rs`: Gathers runtime status from OpenWrt (ubus, uci, ifstatus)
 - `mqtt/handler.rs`: Handles MQTT connection, authentication, topic subscription (using all config fields), and JSON-RPC command dispatch/response
 - `http/routes.rs`: RESTful API for status and command entry, with token authentication required for all endpoints
-- `executor/command.rs`: Executes validated system-level instructions
+- `executor/command.rs`: Executes allowlisted system-level instructions
 - `config/mod.rs`: Loads and validates full `.toml` configuration, including all MQTT/HTTP fields
 - All modules are documented in English
 
@@ -79,10 +81,13 @@ token = "your-api-token"
 - [x] Secure HTTP API with token-based authentication
 - [x] All code comments and documentation in English
 - [x] Compiles cleanly with no warnings
-- [ ] Context collector with UCI/UBUS/ifstatus integration
+- [x] Context collector with OpenWrt UBUS integration and Linux fallback
+- [x] MQTT command response publishing
+- [x] HTTP context and command endpoints backed by live handlers
+- [x] Initial command allowlisting
 - [ ] Device capability introspection (`device.describe`)
 - [ ] WebSocket transport layer for real-time control
-- [ ] Command allowlisting and sandboxing
+- [ ] Command sandboxing beyond the initial allowlist
 - [ ] Plugin-style extensibility for new command modules
 - [ ] Streaming telemetry metrics channel (e.g., `/metrics`)
 - [ ] CLI interface for testing/debugging commands

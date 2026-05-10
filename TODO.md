@@ -5,15 +5,15 @@ Each item is designed to be actionable and clear for future implementation.
 
 ## High Priority
 
-- [ ] Implement real context collection in `context/collector.rs` (integrate with OpenWrt ubus, uci, ifstatus)
-- [ ] Wire up context collection to MQTT and HTTP responses (replace placeholder with real data)
-- [ ] Refactor MQTT response publishing: make `AsyncClient` accessible in event loop (consider Arc/Mutex or channel)
-- [ ] Add unit tests and integration tests for MQTT/HTTP endpoints and command execution
+- [x] Implement real context collection in `context/collector.rs` (OpenWrt ubus with Linux fallback)
+- [x] Wire up context collection to MQTT and HTTP responses (replace placeholder with real data)
+- [x] Refactor MQTT response publishing so the event loop can publish JSON-RPC responses
+- [x] Add focused unit tests for MQTT parsing, HTTP command parsing, context extraction, and command validation
 
 ## Medium Priority
 
 - [ ] Design and scaffold plugin/extensible module architecture for new command/context modules
-- [ ] Improve error handling and logging throughout the codebase
+- [ ] Improve structured logging throughout the codebase
 - [ ] Add JSON schema files for command/context validation and document their usage
 - [ ] Expand configuration validation and error reporting
 

@@ -3,22 +3,22 @@
  * This module is responsible for handling MQTT communication, including subscribing to topics and processing messages.
  */
 
-use rumqttc::{AsyncClient, MqttOptions, QoS};
 use crate::config::Config;
+use crate::executor::command;
+use rumqttc::{AsyncClient, MqttOptions, QoS, Transport};
 use tokio::time::Duration;
-use crate::executor::command; // Import the command executor module
 
 pub async fn initialize_mqtt(config: &Config) -> AsyncClient {
     println!("Initializing MQTT...");
 
-    // Initialize MQTT options using the configuration struct fields
-    let mut mqttoptions = MqttOptions::new(
-        &config.mqtt.client_id,
-        &config.mqtt.broker,
-        1883,
-    );
+    let (host, port, tls) = broker_endpoint(&config.mqtt.broker);
+
+    let mut mqttoptions = MqttOptions::new(&config.mqtt.client_id, host, port);
     mqttoptions.set_keep_alive(Duration::from_secs(30));
     mqttoptions.set_credentials(&config.mqtt.username, &config.mqtt.password);
+    if tls {
+        mqttoptions.set_transport(Transport::tls_with_default_config());
+    }
 
     let (client, eventloop) = AsyncClient::new(mqttoptions, 10);
 
@@ -30,6 +30,8 @@ pub async fn initialize_mqtt(config: &Config) -> AsyncClient {
         .expect("Failed to subscribe to command topic");
 
     // Spawn a task to handle the MQTT event loop and process incoming messages
+    let response_client = client.clone();
+    let response_topic = format!("{}/resp", &config.mqtt.topic_prefix);
     tokio::spawn(async move {
         let mut eventloop = eventloop;
         while let Ok(event) = eventloop.poll().await {
@@ -43,33 +45,33 @@ pub async fn initialize_mqtt(config: &Config) -> AsyncClient {
                         if let Some(method) = json.get("method").and_then(|m| m.as_str()) {
                             match method {
                                 "device.executeCommand" => {
-                                    // Call the command execution logic and publish the response
                                     println!("Received executeCommand: {:?}", json);
-                                    if let Some(params) = json.get("params") {
-                                        let cmd_str = params.get("command").and_then(|c| c.as_str()).unwrap_or("");
-                                        let args = params.get("args").cloned().unwrap_or(serde_json::json!({}));
-                                        // Execute the command asynchronously
-                                        let result = command::execute_command(cmd_str, args).await;
-                                        // Prepare the JSON-RPC response
-                                        let response = serde_json::json!({
-                                            "jsonrpc": "2.0",
-                                            "result": result,
-                                            "id": json.get("id").cloned().unwrap_or(serde_json::json!(null))
-                                        });
-                                        // Publish the response to the reply topic (e.g., topic_prefix + "/resp")
-                                        let device_id = params.get("device_id").and_then(|d| d.as_str()).unwrap_or("unknown");
-                                        let topic = format!("mcp/device/{}/resp", device_id);
-                                        // NOTE: To actually publish, the client instance must be accessible here (e.g., via Arc/Mutex)
-                                        // client.publish(topic, QoS::AtMostOnce, false, response.to_string()).await.ok();
-                                        println!("(TODO) Would publish response to topic {}: {}", topic, response);
-                                    }
+                                    let response = execute_command_response(&json).await;
+                                    publish_response(&response_client, &response_topic, response)
+                                        .await;
                                 }
-                                "device.reportContext" => {
-                                    // TODO: 處理 context 上報
-                                    println!("Received reportContext: {:?}", json);
+                                "device.getContext" | "device.reportContext" => {
+                                    let context =
+                                        crate::context::collector::collect_context().await;
+                                    let response = serde_json::json!({
+                                        "jsonrpc": "2.0",
+                                        "result": context,
+                                        "id": json.get("id").cloned().unwrap_or(serde_json::Value::Null),
+                                    });
+                                    publish_response(&response_client, &response_topic, response)
+                                        .await;
                                 }
                                 _ => {
-                                    println!("Unknown method: {}", method);
+                                    let response = serde_json::json!({
+                                        "jsonrpc": "2.0",
+                                        "error": {
+                                            "code": -32601,
+                                            "message": format!("Unknown method: {method}"),
+                                        },
+                                        "id": json.get("id").cloned().unwrap_or(serde_json::Value::Null),
+                                    });
+                                    publish_response(&response_client, &response_topic, response)
+                                        .await;
                                 }
                             }
                         }
@@ -85,13 +87,96 @@ pub async fn initialize_mqtt(config: &Config) -> AsyncClient {
         }
     });
 
-    // Example: Subscribe to a topic
-    client
-        .subscribe("mcp/device/{device_id}/cmd", QoS::AtMostOnce)
-        .await
-        .expect("Failed to subscribe to command topic");
-
     println!("MQTT client initialized and subscribed to command topic.");
 
     client
+}
+
+async fn execute_command_response(json: &serde_json::Value) -> serde_json::Value {
+    let id = json.get("id").cloned().unwrap_or(serde_json::Value::Null);
+    let Some(params) = json.get("params") else {
+        return json_rpc_error(-32602, "Missing params", id);
+    };
+
+    let Some(cmd_str) = params.get("command").and_then(|c| c.as_str()) else {
+        return json_rpc_error(-32602, "Missing command", id);
+    };
+
+    let args = params
+        .get("args")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+    let result = command::execute_command(cmd_str, args).await;
+
+    serde_json::json!({
+        "jsonrpc": "2.0",
+        "result": result,
+        "id": id,
+    })
+}
+
+async fn publish_response(client: &AsyncClient, topic: &str, response: serde_json::Value) {
+    let payload = response.to_string();
+    if let Err(error) = client.publish(topic, QoS::AtMostOnce, false, payload).await {
+        println!("Failed to publish MQTT response to {topic}: {error}");
+    }
+}
+
+fn json_rpc_error(code: i64, message: &str, id: serde_json::Value) -> serde_json::Value {
+    serde_json::json!({
+        "jsonrpc": "2.0",
+        "error": {
+            "code": code,
+            "message": message,
+        },
+        "id": id,
+    })
+}
+
+fn broker_endpoint(broker: &str) -> (String, u16, bool) {
+    let (tls, broker) = if let Some(rest) = broker.strip_prefix("mqtts://") {
+        (true, rest)
+    } else if let Some(rest) = broker.strip_prefix("ssl://") {
+        (true, rest)
+    } else if let Some(rest) = broker.strip_prefix("mqtt://") {
+        (false, rest)
+    } else if let Some(rest) = broker.strip_prefix("tcp://") {
+        (false, rest)
+    } else {
+        (false, broker)
+    };
+
+    let default_port = if tls { 8883 } else { 1883 };
+    let broker = broker.split('/').next().unwrap_or(broker);
+    let (host, port) = broker
+        .rsplit_once(':')
+        .and_then(|(host, port)| port.parse::<u16>().ok().map(|port| (host, port)))
+        .unwrap_or((broker, default_port));
+
+    (host.to_string(), port, tls)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::broker_endpoint;
+
+    #[test]
+    fn parses_plain_mqtt_broker_urls() {
+        assert_eq!(
+            broker_endpoint("mqtt://broker.example:1884"),
+            ("broker.example".to_string(), 1884, false)
+        );
+        assert_eq!(
+            broker_endpoint("localhost"),
+            ("localhost".to_string(), 1883, false)
+        );
+    }
+
+    #[test]
+    fn parses_tls_mqtt_broker_urls() {
+        assert_eq!(
+            broker_endpoint("mqtts://iot.example.com"),
+            ("iot.example.com".to_string(), 8883, true)
+        );
+    }
 }

@@ -33,11 +33,9 @@ impl Config {
 
         println!("Loading configuration...");
 
-        let config_content = fs::read_to_string("config.toml")
-            .expect("Failed to read config.toml");
+        let config_content = fs::read_to_string("config.toml").expect("Failed to read config.toml");
 
-        toml::from_str(&config_content)
-            .expect("Failed to parse config.toml")
+        toml::from_str(&config_content).expect("Failed to parse config.toml")
     }
 }
 

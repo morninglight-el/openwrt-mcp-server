@@ -1,8 +1,9 @@
-mod mqtt;
-mod http;
-mod context;
 mod config;
+mod context;
 mod executor;
+mod http;
+mod model;
+mod mqtt;
 
 #[tokio::main]
 async fn main() {
@@ -16,7 +17,11 @@ async fn main() {
 
     // Initialize HTTP server only if enabled in config
     let mut http_server = if config.http.enable {
-        let addr: std::net::IpAddr = config.http.listen_addr.parse().expect("Invalid listen_addr");
+        let addr: std::net::IpAddr = config
+            .http
+            .listen_addr
+            .parse()
+            .expect("Invalid listen_addr");
         let token: &'static str = Box::leak(config.http.token.clone().into_boxed_str());
         tokio::spawn(async move {
             warp::serve(http::routes::routes(token))
@@ -30,7 +35,7 @@ async fn main() {
 
     // Start context collector
     let context_data = context::collector::collect_context().await;
-    println!("Collected Context Data: {}", context_data);
+    println!("Collected Context Data: {:?}", context_data);
 
     println!("OpenWrt MCP Server is running.");
 
